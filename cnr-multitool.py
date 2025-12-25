@@ -1,6 +1,7 @@
 import argparse
 import sys
 import subprocess
+import requests
 
 
 parser = argparse.ArgumentParser(description="===  Cybernnerddd Multi-Tool   ====")
@@ -10,7 +11,6 @@ subparsers = parser.add_subparsers(dest="command", help="Available commands")
 # ----------------------------------------------
 # SUBCOMMAND 1: SCAN
 # ----------------------------------------------
-
 
 
 scan_parser = subparsers.add_parser("scan", help="Perform a port scan")
@@ -52,6 +52,31 @@ group.add_argument(
 )
 
 brute_parser.add_argument("url", help="Target URL for bruteforcing")
+brute_parser.add_argument(
+    "--username",
+    help="Username for authentication",
+    required=True
+)
+brute_parser.add_argument(
+    "--password",
+    help="Password for authentication",
+    required=True
+)
+
+brute_parser.add_argument(
+    "--login-url",
+    help="Login URL for authentication",
+    required=True
+)
+
+
+
+
+
+
+
+
+
 
 # ----------------------------------------------
 # SUBCOMMAND 3: EXEC
@@ -60,7 +85,7 @@ brute_parser.add_argument("url", help="Target URL for bruteforcing")
 exec_parser = subparsers.add_parser("exec", help="Execute a system command")
 exec_parser.add_argument("--cmd", required=True, help="System command to execute")
 
-# ----------------------------------------------
+
 
 args = parser.parse_args()
 
@@ -69,12 +94,9 @@ if not args.command:
     parser.print_help()
     sys.exit(1)
 
-
-
 # ----------------------------------------------
 # === COMMAND HANDLERS ===
-# ----------------------------------------------
-
+# ---------------------------------1-------------
 
 
 if args.command == "scan":
@@ -82,11 +104,67 @@ if args.command == "scan":
 
 
 elif args.command == "brute":
-    print(f"[BRUTE MODE] URL: {args.url}")
-    if args.single:
-        print(f"Single: {args.single}")
-    elif args.wordlist:
-        print(f"Wordlist: {args.wordlist}")
+    print(f"\n===== [BRUTE MODE] Target URL: {args.url} =========")
+
+    session = requests.Session()
+
+    # -------------------------------
+    # AUTHENTICATION
+    # -------------------------------
+    login_data = {
+        "username": args.username,
+        "password": args.password
+    }
+
+    try:
+        response = session.post(args.login_url, data=login_data, verify=False, allow_redirects=True)
+    except Exception as e:
+        print(f"[-] Login request failed: {e}")
+        sys.exit(1)
+
+    keywords = ["logout", "dashboard", "welcome", "sign out"]
+
+    if response.status_code in [200, 302, 301]:
+        if any(k in response.text.lower() for k in keywords) or session.cookies:
+            print("[+] Authentication successful")
+        else:
+            print("[-] Authentication failed (no indicators)")
+            sys.exit(1)
+    else:
+        print(f"[-] Login failed (status {response.status_code})")
+        sys.exit(1)
+
+    # -------------------------------
+    # LOAD DIRECTORIES
+    # -------------------------------
+    if args.wordlist:
+        try:
+            with open(args.wordlist, "r") as f:
+                dirs = f.read().splitlines()
+        except FileNotFoundError:
+            print(f"[-] Wordlist not found: {args.wordlist}")
+            sys.exit(1)
+    else:
+        dirs = [args.single]
+
+    print("[*] Establishing baseline...")
+    fake_url = f"{args.url}/this_should_not_exist_123"
+    baseline = session.get(fake_url, verify=False)
+    baseline_len = len(baseline.content)
+    baseline_code = baseline.status_code
+
+    print("[*] Starting directory bruteforce...\n")
+
+    for directory in dirs:
+        target = f"{args.url}/{directory}"
+        res = session.get(target, verify=False)
+
+        if res.status_code == 200 and len(res.content) != baseline_len:
+            print(f"[+] FOUND: {target} (200 | len diff)")
+        elif res.status_code in [301, 302, 307, 308]:
+            print(f"[+] REDIRECT: {target} ({res.status_code})")
+
+
 
 elif args.command == "exec":
     print(f"\n===== [EXEC MODE] Command: \"{args.cmd}\"  =========")
